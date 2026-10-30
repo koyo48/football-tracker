@@ -508,19 +508,19 @@ def render_matches(matches, show_league):
             )
             st.markdown(
                 league_label
-                + '<div style="display:grid;grid-template-columns:minmax(0,1fr) 4.5rem minmax(0,1fr);'
+                + '<div class="match-layout" style="display:grid;grid-template-columns:minmax(0,1fr) 4.5rem minmax(0,1fr);'
                 'align-items:center;gap:0.5rem;font-size:1.05rem;line-height:1.5;">'
-                '<div style="display:grid;grid-template-columns:3.7rem minmax(0,1fr);align-items:center;gap:0.6rem;min-width:0;">'
+                '<div class="match-home" style="display:grid;grid-template-columns:3.7rem minmax(0,1fr);align-items:center;gap:0.6rem;min-width:0;">'
                 '<span style="text-align:center;font-family:monospace;font-size:0.9rem;font-weight:600;'
                 "color:#BBF36E;background:rgba(187,243,110,0.08);border:1px solid rgba(187,243,110,0.22);"
                 f'border-radius:0.35rem;padding:0.2rem 0.1rem;">{escape(time_str)}</span>'
                 '<span style="display:flex;align-items:center;justify-content:center;'
                 'gap:0.65rem;min-width:0;overflow-wrap:anywhere;">'
                 f"{home_crest}<span>{home_label}</span></span></div>"
-                '<div><div style="text-align:center;font-weight:600;font-size:1rem;'
+                '<div class="match-center"><div style="text-align:center;font-weight:600;font-size:1rem;'
                 'background:rgba(128,128,128,0.14);border-radius:0.45rem;padding:0.15rem 0;">'
                 f"{center_label}</div>{status_html}</div>"
-                '<div style="display:grid;grid-template-columns:minmax(0,1fr) 3.7rem;align-items:center;gap:0.6rem;min-width:0;">'
+                '<div class="match-away" style="display:grid;grid-template-columns:minmax(0,1fr) 3.7rem;align-items:center;gap:0.6rem;min-width:0;">'
                 '<span style="display:flex;align-items:center;justify-content:center;'
                 'gap:0.65rem;min-width:0;overflow-wrap:anywhere;">'
                 f"{away_crest}<span>{away_label}</span></span>"
@@ -709,6 +709,69 @@ def main():
             text-align: center !important;
         }
         
+        
+        /* スマートフォン用の試合カード */
+        @media (max-width: 640px) {
+            .match-layout {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) 3rem minmax(0, 1fr) !important;
+                grid-template-areas:
+                    "time time time"
+                    "home center away";
+                gap: 0.8rem 0.35rem !important;
+                align-items: center;
+            }
+
+            .match-home,
+            .match-away {
+                display: contents !important;
+            }
+
+            .match-home > span:first-child {
+                grid-area: time;
+                justify-self: center;
+                width: 4.5rem;
+                box-sizing: border-box;
+            }
+
+            .match-home > span:nth-child(2) {
+                grid-area: home;
+            }
+
+            .match-away > span:first-child {
+                grid-area: away;
+            }
+
+            .match-away > span:last-child {
+                display: none;
+            }
+
+            .match-home > span:nth-child(2),
+            .match-away > span:first-child {
+                display: flex !important;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 0.5rem;
+                text-align: center;
+                font-size: 0.8rem;
+                overflow-wrap: break-word !important;
+                word-break: normal;
+                min-width: 0;
+            }
+
+            .match-home img,
+            .match-away img {
+                width: 30px !important;
+                height: 30px !important;
+            }
+
+            .match-center {
+                grid-area: center;
+                align-self: center;
+            }
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -747,7 +810,11 @@ def main():
                 st.session_state.selected_matchday = max(1, min(38, current + delta))
 
             st.markdown("**節 (Matchday)**")
-            col_prev, col_current, col_next = st.columns([1, 2, 1])
+            col_prev, col_current, col_next = st.columns(
+                [1, 1.3, 1],
+                gap="small",
+                wrap=False,
+            )
 
             with col_prev:
                 st.button(
