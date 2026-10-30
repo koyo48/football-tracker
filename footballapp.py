@@ -577,7 +577,7 @@ def main():
         }
 
         [data-testid="stHeader"] {
-            background: #101114;
+            display: none !important;
         }
 
         .block-container {
@@ -771,7 +771,16 @@ def main():
                 align-self: center;
             }
         }
+        html, body {
+            background-color: #101114 !important;
+        }
 
+        @supports (padding: env(safe-area-inset-top)) {
+            .stApp {
+                min-height: 100dvh;
+            }
+        }
+        
         </style>
         """,
         unsafe_allow_html=True,
