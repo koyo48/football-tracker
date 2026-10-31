@@ -1,4 +1,5 @@
 from datetime import datetime, date
+import calendar
 import requests
 import streamlit as st
 
@@ -389,15 +390,15 @@ def get_matches(code, matchday, api_key, start=None, end=None, calendar_year=Non
             errors.extend(warnings)
             continue
         try:
-            # 日付は日本時間でローカル絞り込み。UTCの日付境界の漏れを防ぐため
-            # APIは当該大会の現シーズンを取得し、節だけ必要に応じてAPIへ渡す。
-            data = fetch_data(
-                target,
-                "matches",
-                api_key,
-                matchday if target in DOMESTIC_CODES else None,
-            )
+            # 現シーズンの全試合をリーグごとに取得・キャッシュする。
+            # 節を変えても同じキャッシュを再利用できるようにする。
+            # 日付は日本時間で後から絞り込む（UTCの日付境界の漏れを防ぐ）。
+            data = fetch_data(target, "matches", api_key)
             normalized, skipped = normalize_api_matches(data, target)
+            if matchday is not None and target in DOMESTIC_CODES:
+                normalized = [
+                    match for match in normalized if match.get("matchday") == matchday
+                ]
             matches.extend(normalized)
             if skipped:
                 errors.append(
@@ -500,10 +501,19 @@ def render_matches(matches, show_league):
                 else ""
             )
             status_label = escape(status_note.replace("**", "").strip())
+            # J1の長い注記は中央の狭いスコア欄に入れず、カード全幅の下部に表示。
+            is_j1_calendar = match["competition_code"] == "J1" and status == "CALENDAR"
             status_html = (
-                '<div style="text-align:center;font-size:0.8rem;line-height:1.4;margin-top:0.3rem;">'
+                '<div style="text-align:center;font-size:0.8rem;line-height:1.4;margin-top:0.3rem;white-space:nowrap;">'
                 f"{status_label}</div>"
-                if status_label
+                if status_label and not is_j1_calendar
+                else ""
+            )
+            footer_html = (
+                '<div style="text-align:center;font-size:0.8rem;line-height:1.5;'
+                'margin-top:0.55rem;overflow-wrap:anywhere;">'
+                f"{status_label}</div>"
+                if is_j1_calendar
                 else ""
             )
             st.markdown(
@@ -524,7 +534,7 @@ def render_matches(matches, show_league):
                 '<span style="display:flex;align-items:center;justify-content:center;'
                 'gap:0.65rem;min-width:0;overflow-wrap:anywhere;">'
                 f"{away_crest}<span>{away_label}</span></span>"
-                '<span aria-hidden="true"></span></div></div>',
+                '<span aria-hidden="true"></span></div></div>' + footer_html,
                 unsafe_allow_html=True,
             )
             round_note = note[len(status_note) :].strip()
@@ -559,6 +569,100 @@ def standings_rows(rows):
         )
         result.append(record)
     return result
+
+
+def closest_matchday(matches, today):
+    """未消化の最も近い節。全試合終了後は最後の節を選ぶ。"""
+    rounds = {}
+    for match in matches:
+        number = match.get("matchday")
+        raw_date = match.get("localDate")
+        if not isinstance(number, int) or not raw_date:
+            continue
+        try:
+            match_date = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        rounds.setdefault(number, []).append((match_date, match.get("status")))
+    if not rounds:
+        return 9
+    upcoming = [
+        (min(d for d, status in games if d >= today), number)
+        for number, games in rounds.items()
+        if any(d >= today for d, status in games)
+    ]
+    if upcoming:
+        return min(upcoming)[1]
+    # シーズンが終了したときは最新の開催節を表示する。
+    return max(rounds, key=lambda number: max(d for d, _ in rounds[number]))
+
+
+def standings_season_label(data):
+    """APIのシーズン開始/終了日を使い、タイトル表示用の年を生成する。"""
+    season = data.get("season") or {}
+    start, end = season.get("startDate"), season.get("endDate")
+    if not isinstance(start, str) or not isinstance(end, str):
+        return ""
+    try:
+        start_year, end_year = (
+            date.fromisoformat(start).year,
+            date.fromisoformat(end).year,
+        )
+    except ValueError:
+        return ""
+    if start_year == end_year:
+        return f"{start_year}シーズン"
+    return f"{start_year}/{str(end_year)[-2:]}シーズン"
+
+
+def render_standings(rows):
+    """PCでは全列、スマホでは主要5列を表示するレスポンシブ順位表。"""
+    labels = (
+        "順位",
+        "チーム",
+        "試合",
+        "勝",
+        "分",
+        "負",
+        "得点",
+        "失点",
+        "得失点",
+        "勝ち点",
+    )
+    compact = {"勝", "分", "負", "得点", "失点"}
+    head = "".join(
+        f'<th scope="col" class="{ "hide-mobile" if label in compact else "" }">{label}</th>'
+        for label in labels
+    )
+    body = []
+    for row in standings_rows(rows):
+        cells = []
+        for label in labels:
+            value = row.get(label, "-")
+            classes = []
+            if label in compact:
+                classes.append("hide-mobile")
+            if label == "チーム":
+                classes.append("team-cell")
+            if label == "勝ち点":
+                classes.append("points-cell")
+            if label == "得失点" and isinstance(value, (int, float)):
+                classes.append(
+                    "gd-positive" if value > 0 else "gd-negative" if value < 0 else ""
+                )
+                if value > 0:
+                    value = f"+{value}"
+            class_attr = (
+                f' class="{ " ".join(filter(None, classes)) }"' if classes else ""
+            )
+            cells.append(f"<td{class_attr}>{escape(str(value))}</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    st.markdown(
+        '<div class="standings-scroll"><table class="custom-standings" aria-label="リーグ順位表">'
+        f'<thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>'
+        '<div class="standings-hint">スマートフォンでは主な項目のみ表示しています。</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def main():
@@ -676,22 +780,52 @@ def main():
 
         /* 順位表 */
         [data-testid="stTable"] {
-            border: 1px solid #303238;
+            border: 1px solid #393D43;
             border-radius: 10px;
             overflow: hidden;
         }
 
         [data-testid="stTable"] table {
             background: #1C1E22;
+            color: #ECEEF0;
         }
 
         [data-testid="stTable"] th {
-            background: #282B30;
-            color: #D8DBDF;
+            background: #30343A !important;
+            color: #F5F6F7 !important;
+            font-weight: 650;
         }
 
         [data-testid="stTable"] td {
-            border-color: #32353A;
+            color: #E2E6EA !important;
+            border-color: #353940 !important;
+        }
+
+        [data-testid="stTable"] tbody tr:nth-child(even) {
+            background: #24272C;
+        }
+
+        /* スマホとPCで列を切り替える順位表 */
+        .standings-scroll { overflow-x: auto; border: 1px solid #393D43; border-radius: 10px; }
+        .custom-standings { width: 100%; border-collapse: collapse; background: #1C1E22; font-size: 0.86rem; }
+        .custom-standings th { background: #30343A; color: #F5F6F7; font-weight: 650; text-align: right; }
+        .custom-standings th:nth-child(2), .custom-standings td:nth-child(2) { text-align: left; }
+        .custom-standings th, .custom-standings td { padding: 0.64rem 0.58rem; border-bottom: 1px solid #353940; white-space: nowrap; }
+        .custom-standings td { color: #E2E6EA; text-align: right; }
+        .custom-standings tbody tr:nth-child(even) { background: #24272C; }
+        .custom-standings tbody tr:last-child td { border-bottom: 0; }
+        .custom-standings .team-cell { min-width: 185px; white-space: normal; font-weight: 500; }
+        .custom-standings .points-cell { font-weight: 750; color: #BBF36E; }
+        .custom-standings .gd-positive { color: #9AE0BB; }
+        .custom-standings .gd-negative { color: #F0A0A0; }
+        .standings-hint { display: none; }
+        @media (max-width: 640px) {
+            .custom-standings { font-size: 0.79rem; }
+            .custom-standings .hide-mobile { display: none; }
+            .custom-standings th, .custom-standings td { padding: 0.58rem 0.27rem; }
+            .custom-standings .team-cell { min-width: 0; overflow-wrap: anywhere; }
+            .custom-standings th:nth-child(2), .custom-standings td:nth-child(2) { width: 48%; }
+            .standings-hint { display: block; font-size: 0.76rem; color: #AAB0B8; margin-top: 0.4rem; }
         }
 
         /* 警告・案内 */
@@ -710,6 +844,19 @@ def main():
         }
         
         
+        /* iPhone Safari: リーグ選択欄の内側まで16px以上にして自動ズームを抑える */
+        /* iPhoneの入力欄フォーカス時の自動ズーム対策 */
+        @media (max-width: 640px) {
+            input,
+            select,
+            textarea,
+            [role="combobox"],
+            [data-baseweb="select"] input,
+            [data-baseweb="select"] div[role="combobox"] {
+                font-size: 16px !important;
+            }
+        }
+
         /* スマートフォン用の試合カード */
         @media (max-width: 640px) {
             .match-layout {
@@ -811,8 +958,21 @@ def main():
             )
 
         if code in DOMESTIC_CODES or same_matchday:
-            if "selected_matchday" not in st.session_state:
-                st.session_state.selected_matchday = 9
+            # リーグ変更時のみ現在の節へ移動。手動で選んだ節は保持する。
+            reference_code = code if code in DOMESTIC_CODES else "PL"
+            if st.session_state.get("matchday_reference_code") != reference_code:
+                selected_round = 9
+                if api_key:
+                    try:
+                        season_matches = fetch_data(reference_code, "matches", api_key)
+                        normalized, _ = normalize_api_matches(
+                            season_matches, reference_code
+                        )
+                        selected_round = closest_matchday(normalized, today)
+                    except ApiError:
+                        pass  # API障害中は従来の第9節を暫定表示
+                st.session_state.selected_matchday = selected_round
+                st.session_state.matchday_reference_code = reference_code
 
             def change_matchday(delta):
                 current = st.session_state.selected_matchday
@@ -853,6 +1013,60 @@ def main():
                 )
 
             matchday = st.session_state.selected_matchday
+
+        elif code in ("CL", "J1"):
+            # CL/J1は大会全体で共通する節番号がないため、月単位で移動する。
+            months = [
+                date(year, month, 1)
+                for year in range(2025, today.year + 3)
+                for month in range(1, 13)
+            ]
+            if st.session_state.get("selected_schedule_month") not in months:
+                st.session_state.selected_schedule_month = today.replace(day=1)
+
+            def change_schedule_month(delta):
+                current = st.session_state.selected_schedule_month
+                index = months.index(current)
+                st.session_state.selected_schedule_month = months[
+                    max(0, min(len(months) - 1, index + delta))
+                ]
+
+            st.markdown("**表示する月**")
+            col_prev, col_current, col_next = st.columns(
+                [1, 1.3, 1], gap="small", wrap=False
+            )
+            with col_prev:
+                st.button(
+                    "❮ 前月",
+                    key="prev_schedule_month",
+                    disabled=st.session_state.selected_schedule_month == months[0],
+                    use_container_width=True,
+                    on_click=change_schedule_month,
+                    args=(-1,),
+                )
+            with col_current:
+                st.selectbox(
+                    "表示月を選択",
+                    options=months,
+                    format_func=lambda month: f"{month.year}年{month.month}月",
+                    key="selected_schedule_month",
+                    label_visibility="collapsed",
+                )
+            with col_next:
+                st.button(
+                    "次月 ❯",
+                    key="next_schedule_month",
+                    disabled=st.session_state.selected_schedule_month == months[-1],
+                    use_container_width=True,
+                    on_click=change_schedule_month,
+                    args=(1,),
+                )
+            start = st.session_state.selected_schedule_month
+            end = date(
+                start.year,
+                start.month,
+                calendar.monthrange(start.year, start.month)[1],
+            )
 
         else:
             st.caption(
@@ -1009,7 +1223,10 @@ def main():
                                 group.get("stage"), group.get("stage") or "順位表"
                             )
                             st.caption(f"{stage} {group.get('group') or ''}")
-                        st.table(standings_rows(group["table"]))
+                        season_text = standings_season_label(data)
+                        if season_text:
+                            st.caption(season_text)
+                        render_standings(group["table"])
                 if not found:
                     st.info(
                         "取得元に順位表がありません。トーナメント段階にはリーグ形式の順位表がない場合があります。"
