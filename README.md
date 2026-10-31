@@ -4,6 +4,12 @@
 
 > ポートフォリオ作品 / Python・Streamlit・外部API連携
 
+## アプリを試す
+
+**[サッカートラッカーを開く](https://football-tracker-lmq5b42qismgroj2jrhuyj.streamlit.app/)**
+
+PC・スマートフォンの両方から利用できます。
+
 ## 主な機能
 
 - **日程・結果**：リーグごとに試合日程、キックオフ時刻、クラブ名・エンブレム、取得可能な試合結果を表示
