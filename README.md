@@ -14,6 +14,17 @@
 - **レスポンシブ表示**：スマートフォン向けの試合カード・順位表
 - **データのキャッシュ**：APIへの重複アクセスを削減
 
+## スクリーンショット
+
+### 試合日程・結果（PC）
+![PC版の日程画面](screenshots/schedule-pc.png)
+
+### 順位表（PC）
+![順位表](screenshots/standings-pc.png)
+
+### スマートフォン表示
+<img src="screenshots/schedule-mobile.png" width="320" alt="スマートフォン版の日程画面">
+
 ## 対応大会・データソース
 
 | 大会 | 日程 | 結果 | 順位表 | 取得元 |
